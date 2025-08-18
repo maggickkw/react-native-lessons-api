@@ -79,6 +79,11 @@ func main() {
 	app.Put("/api/notes/:id", updateNote)
 	app.Delete("/api/notes/:id", deleteNote)
 
+	// Favorites
+	app.Post("/favorites", addFavorite)
+	app.Get("/favorites/:userId", getFavorites)
+	app.Delete("/favorites/:userId/:noteId", removeFavorite)
+
 	// Health check
 	app.Get("/api/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
@@ -129,6 +134,21 @@ func createTables() {
 		user_id INTEGER NOT NULL,
 		FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 	);`
+
+	favoritesTable := `
+    CREATE TABLE IF NOT EXISTS favorites (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        note_id INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(id),
+        FOREIGN KEY(note_id) REFERENCES notes(id),
+        UNIQUE(user_id, note_id) -- prevents duplicate favorites
+    )
+`
+	if _, err := db.Exec(favoritesTable); err != nil {
+		log.Fatal("Failed to create favorites table:", err)
+	}
 
 	if _, err := db.Exec(userTable); err != nil {
 		log.Fatal("Failed to create users table:", err)
@@ -475,4 +495,62 @@ func deleteNote(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"message": "Note deleted successfully"})
+}
+
+func addFavorite(c *fiber.Ctx) error {
+	type req struct {
+		UserID int `json:"user_id"`
+		NoteID int `json:"note_id"`
+	}
+	var body req
+	if err := c.BodyParser(&body); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
+	}
+
+	_, err := db.Exec("INSERT OR IGNORE INTO favorites (user_id, note_id) VALUES (?, ?)", body.UserID, body.NoteID)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to add favorite"})
+	}
+
+	return c.JSON(fiber.Map{"message": "Note favorited"})
+}
+
+func getFavorites(c *fiber.Ctx) error {
+	userId := c.Params("userId")
+
+	rows, err := db.Query(`
+        SELECT notes.id, notes.title, notes.content, notes.created_at
+        FROM notes
+        JOIN favorites ON notes.id = favorites.note_id
+        WHERE favorites.user_id = ?
+    `, userId)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch favorites"})
+	}
+	defer rows.Close()
+
+	var notes []fiber.Map
+	for rows.Next() {
+		var id int
+		var title, content string
+		var createdAt string
+		rows.Scan(&id, &title, &content, &createdAt)
+		notes = append(notes, fiber.Map{
+			"id": id, "title": title, "content": content, "created_at": createdAt,
+		})
+	}
+
+	return c.JSON(notes)
+}
+
+func removeFavorite(c *fiber.Ctx) error {
+	userId := c.Params("userId")
+	noteId := c.Params("noteId")
+
+	_, err := db.Exec("DELETE FROM favorites WHERE user_id = ? AND note_id = ?", userId, noteId)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to remove favorite"})
+	}
+
+	return c.JSON(fiber.Map{"message": "Favorite removed"})
 }
