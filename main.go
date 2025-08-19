@@ -79,7 +79,6 @@ func main() {
 	app.Put("/api/notes/:id", updateNote)
 	app.Delete("/api/notes/:id", deleteNote)
 
-	// Favorites
 	app.Post("/favorites", addFavorite)
 	app.Get("/favorites/:userId", getFavorites)
 	app.Delete("/favorites/:userId/:noteId", removeFavorite)
